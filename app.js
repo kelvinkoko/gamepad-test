@@ -1,98 +1,97 @@
-const lapTimesDiv = document.getElementById("lap-times");
+const EASYLAP_VID = 0x10C4; // Silicon Labs
+const EASYLAP_PID = 0x86B9; // CP2110 HID USB to UART Bridge
+const PACKET_TIMER = 0x0B;
+const PACKET_CAR = 0x0D;
 
-let device = null;
+let device;
 let buffer = [];
-const lastLapTimeByCar = new Map();
 
-document.getElementById("connect").addEventListener("click", async () => {
-  const filters = [{ vendorId: 0x10C4, productId: 0x86B9 }]; // EasyLAP CP2110
-
-  try {
-    const devices = await navigator.hid.requestDevice({ filters });
-    if (devices.length === 0) return;
-
-    device = devices[0];
-    await device.open();
-
-    // Send UART config feature report
-    await configureUART(device);
-
-    device.addEventListener("inputreport", handleInputReport);
-
-    console.log("✅ Connected to EasyLAP.");
-    lapTimesDiv.innerHTML = "<p>Connected. Waiting for lap data...</p>";
-  } catch (error) {
-    console.error("❌ Connection failed:", error);
-  }
-});
-
-async function configureUART(device) {
-  const enable = new Uint8Array([0x41, 0x01]); // Enable UART
-
-  try {
-    await device.sendFeatureReport(0x41, enable.slice(1));
-    console.log("✅ UART enabled (default config)");
-  } catch (error) {
-    console.error("❌ UART enable failed:", error);
-  }
+// Convert bytes to uint32 from 4 bytes in little-endian
+function readUint32LE(bytes, offset) {
+  return bytes[offset] |
+         (bytes[offset + 1] << 8) |
+         (bytes[offset + 2] << 16) |
+         (bytes[offset + 3] << 24);
 }
 
-
-function handleInputReport(event) {
-  const data = new Uint8Array(event.data.buffer);
-
-  // Uncomment to debug:
-  console.log("📥 Received:", Array.from(data).map(x => x.toString(16).padStart(2, "0")).join(" "));
-
-  buffer.push(...data);
-
+// Handle a parsed EasyLAP packet
+function handlePacket(callback) {
   while (buffer.length > 0) {
-    if (buffer[0] === 0x0B && buffer.length >= 12) {
-      // Timer packet (System timer)
+    const header = buffer[0];
+
+    if (header === PACKET_TIMER) {
+      if (buffer.length < 12) break; // wait for full packet
       if (buffer[2] !== 0x83) {
         buffer.shift();
         continue;
       }
-      const timer =
-        buffer[3] |
-        (buffer[4] << 8) |
-        (buffer[5] << 16) |
-        (buffer[6] << 24);
-      displayTimer(timer, null);
-      buffer = buffer.slice(12);
-    } else if (buffer[0] === 0x0D && buffer.length >= 14) {
-      // Car packet (Lap time)
+
+      const timer = readUint32LE(buffer, 3);
+      callback({ t: timer, c: null });
+      buffer.splice(0, 12); // 0x0B + 1
+
+    } else if (header === PACKET_CAR) {
+      if (buffer.length < 14) break; // wait for full packet
       if (buffer[2] !== 0x84) {
         buffer.shift();
         continue;
       }
-      const carId = buffer[3] | (buffer[4] << 8);
-      const timer =
-        buffer[7] |
-        (buffer[8] << 8) |
-        (buffer[9] << 16) |
-        (buffer[10] << 24);
 
-      // 🧠 Check for duplicate
-      if (lastLapTimeByCar.get(carId) !== timer) {
-        lastLapTimeByCar.set(carId, timer);
-        displayTimer(timer, carId);
-      }
+      const uid = buffer[3] | (buffer[4] << 8);
+      const timer = readUint32LE(buffer, 7);
+      callback({ t: timer, c: uid });
+      buffer.splice(0, 14); // 0x0D + 1
 
-      buffer = buffer.slice(14);
     } else {
-      buffer.shift(); // discard unrecognized
+      buffer.shift(); // discard garbage
     }
   }
 }
 
-function displayTimer(timer, carId) {
-  const div = document.createElement("div");
-  const seconds = (timer / 1000).toFixed(3);
-  div.textContent = carId !== null
-    ? `🚗 Car ${carId} - Lap: ${seconds}s`
-    : `⏱️ System Timer: ${seconds}s`;
+// Read loop
+async function startListening(callback) {
+  while (true) {
+    try {
+      const { data } = await device.receiveReport();
+      if (data && data.buffer.byteLength > 0) {
+        const bytes = Array.from(new Uint8Array(data.buffer));
+        buffer.push(...bytes);
+        handlePacket(callback);
+      }
+    } catch (err) {
+      console.error("Error reading from device:", err);
+      break;
+    }
 
-  // Prepend the lap time at the top
-  lapTimesDiv.insertBefore(div, lapTimesDiv.firstChild);
+    await new Promise(res => setTimeout(res, 25));
+  }
 }
+
+// Connect button handler
+document.getElementById("connect").addEventListener("click", async () => {
+  try {
+    const devices = await navigator.hid.requestDevice({
+      filters: [{ vendorId: EASYLAP_VID, productId: EASYLAP_PID }]
+    });
+
+    if (devices.length === 0) {
+      alert("Device not selected.");
+      return;
+    }
+
+    device = devices[0];
+    await device.open();
+    console.log("Connected to EasyLAP");
+
+    startListening(({ t, c }) => {
+      if (c === null) {
+        console.log("Timer:", t);
+      } else {
+        console.log("Car", c, "at", t);
+      }
+    });
+
+  } catch (err) {
+    console.error("Failed to connect:", err);
+  }
+});
