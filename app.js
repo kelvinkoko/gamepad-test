@@ -44,13 +44,21 @@ async function configureUART(device) {
     0x00, 0x00, 0x00, 0x00 // Reserved
   ]);
 
+  const enable = new Uint8Array([
+    0x41, 0x01 // Report ID 0x41: Set UART Enable, Enable = 1
+  ]);
+
   try {
-    await device.sendFeatureReport(0x50, config.slice(1)); // exclude Report ID from data
-    console.log("✅ UART config sent to EasyLAP.");
+    await device.sendFeatureReport(0x50, config.slice(1)); // Exclude Report ID
+    console.log("✅ UART config sent");
+
+    await device.sendFeatureReport(0x41, enable.slice(1)); // Enable UART
+    console.log("✅ UART enabled");
   } catch (error) {
-    console.error("❌ Failed to send UART config:", error);
+    console.error("❌ UART setup failed:", error);
   }
 }
+
 
 function handleInputReport(event) {
   const data = new Uint8Array(event.data.buffer);
