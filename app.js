@@ -64,7 +64,7 @@ function handleInputReport(event) {
   const data = new Uint8Array(event.data.buffer);
 
   // Uncomment to debug:
-  // console.log("📥 Received:", Array.from(data).map(x => x.toString(16).padStart(2, "0")).join(" "));
+  console.log("📥 Received:", Array.from(data).map(x => x.toString(16).padStart(2, "0")).join(" "));
 
   buffer.push(...data);
 
