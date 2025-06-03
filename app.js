@@ -27,38 +27,16 @@ document.getElementById("connect").addEventListener("click", async () => {
 });
 
 async function configureUART(device) {
-  const baudRate = 38400;
-  const baudBytes = new Uint8Array([
-    baudRate & 0xFF,
-    (baudRate >> 8) & 0xFF,
-    (baudRate >> 16) & 0xFF,
-    (baudRate >> 24) & 0xFF
-  ]);
-
-  const config = new Uint8Array([
-    0x50,             // Report ID: Set UART Config
-    ...baudBytes,     // 4 bytes: Baud rate
-    0x08,             // Data bits: 8
-    0x00,             // Parity: None
-    0x00,             // Stop bits: 1
-    0x00,             // Flow control: None
-    0x00, 0x00, 0x00, 0x00 // Reserved
-  ]);
-
-  const enable = new Uint8Array([
-    0x41, 0x01 // Report ID 0x41: Set UART Enable, Enable = 1
-  ]);
+  const enable = new Uint8Array([0x41, 0x01]); // Enable UART
 
   try {
-    await device.sendFeatureReport(0x50, config.slice(1));
-    console.log("✅ UART config sent");
-
     await device.sendFeatureReport(0x41, enable.slice(1));
-    console.log("✅ UART enabled");
+    console.log("✅ UART enabled (default config)");
   } catch (error) {
-    console.error("❌ UART setup failed:", error);
+    console.error("❌ UART enable failed:", error);
   }
 }
+
 
 function handleInputReport(event) {
   const data = new Uint8Array(event.data.buffer);
