@@ -37,34 +37,23 @@
         await device.open();
         log('Connected to EasyLAP');
 
-        await enableUART();
+        await configureUART(device);
         startReadLoop(handlePacket);
       } catch (err) {
         log('Error: ' + err.message);
       }
     });
 
-    async function enableUART() {
-      const reportId = 0x01;
-      const baud = 38400;
-      const baudBytes = [
-        baud & 0xFF,
-        (baud >> 8) & 0xFF,
-        (baud >> 16) & 0xFF,
-        (baud >> 24) & 0xFF
-      ];
+async function configureUART(device) {
+  const enable = new Uint8Array([0x41, 0x01]); // Enable UART
 
-      const report = new Uint8Array([
-        ...baudBytes,
-        0x00, // parity: none
-        0x00, // flow control: disabled
-        0x08, // data bits: 8
-        0x01  // stop bits: 1
-      ]);
-
-      await device.sendReport(reportId, report);
-      log('UART enabled at 38400 baud');
-    }
+  try {
+    await device.sendFeatureReport(0x41, enable.slice(1));
+    console.log("✅ UART enabled (default config)");
+  } catch (error) {
+    console.error("❌ UART enable failed:", error);
+  }
+}
 
     function startReadLoop(callback) {
       const buf = [];
