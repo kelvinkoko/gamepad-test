@@ -1,11 +1,132 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>EasyLAP WebHID</title>
+  <meta charset="UTF-8">
+  <title>EasyLAP WebHID Viewer</title>
+  <style>
+    body { font-family: sans-serif; padding: 1rem; }
+    button { padding: 0.5rem 1rem; font-size: 1rem; }
+    #log { margin-top: 1rem; white-space: pre; font-family: monospace; max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 1rem; }
+  </style>
 </head>
 <body>
-  <h1>EasyLAP WebHID Timing</h1>
-  <button id="connect">Connect to EasyLAP</button>
-  <script src="app.js"></script>
+  <h1>EasyLAP WebHID Viewer</h1>
+  <button id="connectButton">Connect to EasyLAP</button>
+  <div id="log"></div>
+
+  <script>
+    const EASYLAP_VID = 0x10C4; // Silicon Labs
+    const EASYLAP_PID = 0x86B9; // EasyLAP
+
+    let device = null;
+    let readLoopActive = false;
+    const logDiv = document.getElementById('log');
+
+    document.getElementById('connectButton').addEventListener('click', async () => {
+      try {
+        const devices = await navigator.hid.requestDevice({
+          filters: [{ vendorId: EASYLAP_VID, productId: EASYLAP_PID }]
+        });
+
+        if (devices.length === 0) {
+          log('No device selected.');
+          return;
+        }
+
+        device = devices[0];
+        await device.open();
+        log('Connected to EasyLAP');
+
+        await enableUART();
+        startReadLoop(handlePacket);
+      } catch (err) {
+        log('Error: ' + err.message);
+      }
+    });
+
+    async function enableUART() {
+      const reportId = 0x01;
+      const baud = 38400;
+      const baudBytes = [
+        baud & 0xFF,
+        (baud >> 8) & 0xFF,
+        (baud >> 16) & 0xFF,
+        (baud >> 24) & 0xFF
+      ];
+
+      const report = new Uint8Array([
+        ...baudBytes,
+        0x00, // parity: none
+        0x00, // flow control: disabled
+        0x08, // data bits: 8
+        0x01  // stop bits: 1
+      ]);
+
+      await device.sendReport(reportId, report);
+      log('UART enabled at 38400 baud');
+    }
+
+    function startReadLoop(callback) {
+      const buf = [];
+
+      if (readLoopActive) return;
+      readLoopActive = true;
+
+      device.addEventListener('inputreport', (event) => {
+        const bytes = [...new Uint8Array(event.data.buffer)];
+        buf.push(...bytes);
+        parseBuffer(buf, callback);
+      });
+    }
+
+    function parseBuffer(buf, callback) {
+      while (buf.length > 0) {
+        if (buf[0] === 0x0B) {
+          if (buf.length >= 3 && buf[2] !== 0x83) {
+            buf.shift();
+          } else if (buf.length >= 12) {
+            const t = parseTimer(buf.slice(3, 7));
+            callback({ t, c: null });
+            buf.splice(0, 12);
+          } else {
+            break;
+          }
+        } else if (buf[0] === 0x0D) {
+          if (buf.length >= 3 && buf[2] !== 0x84) {
+            buf.shift();
+          } else if (buf.length >= 14) {
+            const c = buf[3] | (buf[4] << 8);
+            const t = parseTimer(buf.slice(7, 11));
+            callback({ t, c });
+            buf.splice(0, 14);
+          } else {
+            break;
+          }
+        } else {
+          buf.shift();
+        }
+      }
+    }
+
+    function parseTimer(bytes) {
+      // Convert 4 bytes to unsigned integer
+      return bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24);
+    }
+
+    function handlePacket({ t, c }) {
+      const time = t.toString().padStart(8, '0');
+      if (c === null) {
+        log(`Timer sync: t=${time}`);
+      } else {
+        log(`Car ${c}: t=${time}`);
+      }
+    }
+
+    function log(text) {
+      console.log(text);
+      logDiv.textContent += text + '\n';
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+  </script>
 </body>
 </html>
