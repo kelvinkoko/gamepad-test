@@ -74,6 +74,9 @@
 
       device.addEventListener('inputreport', (event) => {
         const bytes = [...new Uint8Array(event.data.buffer)];
+            // 🐛 DEBUG: print raw received bytes
+    console.log('Raw input:', bytes.map(b => b.toString(16).padStart(2, '0')).join(' '));
+
         buf.push(...bytes);
         parseBuffer(buf, callback);
       });
