@@ -2,6 +2,7 @@ const lapTimesDiv = document.getElementById("lap-times");
 
 let device = null;
 let buffer = [];
+const lastLapTimeByCar = new Map();
 
 document.getElementById("connect").addEventListener("click", async () => {
   const filters = [{ vendorId: 0x10C4, productId: 0x86B9 }]; // EasyLAP CP2110
@@ -49,28 +50,27 @@ async function configureUART(device) {
   ]);
 
   try {
-    await device.sendFeatureReport(0x50, config.slice(1)); // Exclude Report ID
+    await device.sendFeatureReport(0x50, config.slice(1));
     console.log("✅ UART config sent");
 
-    await device.sendFeatureReport(0x41, enable.slice(1)); // Enable UART
+    await device.sendFeatureReport(0x41, enable.slice(1));
     console.log("✅ UART enabled");
   } catch (error) {
     console.error("❌ UART setup failed:", error);
   }
 }
 
-
 function handleInputReport(event) {
   const data = new Uint8Array(event.data.buffer);
 
-  // 🔍 Debug: Log raw data
-  console.log("📥 Received:", Array.from(data).map(x => x.toString(16).padStart(2, "0")).join(" "));
+  // Uncomment to debug:
+  // console.log("📥 Received:", Array.from(data).map(x => x.toString(16).padStart(2, "0")).join(" "));
 
   buffer.push(...data);
 
   while (buffer.length > 0) {
-    if (buffer[0] === 0x0B && buffer.length >= 11) {
-      // Timer packet
+    if (buffer[0] === 0x0B && buffer.length >= 12) {
+      // Timer packet (System timer)
       if (buffer[2] !== 0x83) {
         buffer.shift();
         continue;
@@ -82,8 +82,8 @@ function handleInputReport(event) {
         (buffer[6] << 24);
       displayTimer(timer, null);
       buffer = buffer.slice(12);
-    } else if (buffer[0] === 0x0D && buffer.length >= 13) {
-      // Car packet
+    } else if (buffer[0] === 0x0D && buffer.length >= 14) {
+      // Car packet (Lap time)
       if (buffer[2] !== 0x84) {
         buffer.shift();
         continue;
@@ -94,7 +94,13 @@ function handleInputReport(event) {
         (buffer[8] << 8) |
         (buffer[9] << 16) |
         (buffer[10] << 24);
-      displayTimer(timer, carId);
+
+      // 🧠 Check for duplicate
+      if (lastLapTimeByCar.get(carId) !== timer) {
+        lastLapTimeByCar.set(carId, timer);
+        displayTimer(timer, carId);
+      }
+
       buffer = buffer.slice(14);
     } else {
       buffer.shift(); // discard unrecognized
@@ -108,5 +114,7 @@ function displayTimer(timer, carId) {
   div.textContent = carId !== null
     ? `🚗 Car ${carId} - Lap: ${seconds}s`
     : `⏱️ System Timer: ${seconds}s`;
-  lapTimesDiv.appendChild(div);
+
+  // Prepend the lap time at the top
+  lapTimesDiv.insertBefore(div, lapTimesDiv.firstChild);
 }
