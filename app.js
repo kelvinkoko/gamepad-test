@@ -1,8 +1,8 @@
 document.getElementById('connect').addEventListener('click', async () => {
   const filters = [
     {
-      vendorId: 0x1234, // Replace with EasyLAP's vendor ID
-      productId: 0x5678 // Replace with EasyLAP's product ID
+      vendorId: 0x10c4, // Replace with EasyLAP's vendor ID
+      productId: 0x86b9 // Replace with EasyLAP's product ID
     }
   ];
 
