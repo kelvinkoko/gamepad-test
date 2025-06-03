@@ -1,52 +1,13 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>EasyLap WebUSB Test</title>
+  <meta charset="UTF-8">
+  <title>EasyLAP Timer</title>
 </head>
 <body>
-  <button id="connect">Connect to EasyLap</button>
-  <pre id="output"></pre>
+  <button id="connect">Connect to EasyLAP</button>
+  <div id="lap-times"></div>
 
-  <script>
-    const vendorId = 0x10C4; // Silicon Labs
-    const productId = 0x86b9; // Example CP2110 Product ID, replace with yours
-
-    const output = document.getElementById("output");
-
-    document.getElementById("connect").addEventListener("click", async () => {
-      try {
-        const device = await navigator.usb.requestDevice({
-          filters: [{ vendorId, productId }]
-        });
-
-        await device.open();
-        await device.selectConfiguration(1);
-        await device.claimInterface(0);
-
-        output.textContent += "Device connected!\n";
-
-        // CP2110 does not behave like a regular serial device.
-        // We'll attempt to read HID report-style data
-        // You might need to know the exact endpoint and protocol used.
-
-        const endpointNumber = 1; // Replace with correct IN endpoint number
-
-        while (true) {
-          const result = await device.transferIn(endpointNumber, 64);
-          if (result.status === 'ok') {
-            const decoder = new TextDecoder();
-            const data = decoder.decode(result.data);
-            output.textContent += `Received: ${data}\n`;
-          } else {
-            output.textContent += `Transfer error: ${result.status}\n`;
-            break;
-          }
-        }
-      } catch (err) {
-        output.textContent += `Error: ${err.message}\n`;
-        console.error(err);
-      }
-    });
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>
