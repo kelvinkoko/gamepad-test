@@ -1,124 +1,221 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>EasyLAP WebHID Viewer</title>
-  <style>
-    body { font-family: sans-serif; padding: 1rem; }
-    button { padding: 0.5rem 1rem; font-size: 1rem; }
-    #log { margin-top: 1rem; white-space: pre; font-family: monospace; max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 1rem; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyLap Monitor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        #console {
+            background-color: #1e1e1e;
+            color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        .button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 0;
+        }
+        .button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .debug {
+            color: #888;
+        }
+        .error {
+            color: #ff6b6b;
+        }
+        .success {
+            color: #4CAF50;
+        }
+    </style>
 </head>
 <body>
-  <h1>EasyLAP WebHID Viewer</h1>
-  <button id="connectButton">Connect to EasyLAP</button>
-  <div id="log"></div>
+    <div class="container">
+        <h1>EasyLap Monitor</h1>
+        <button id="connectButton" class="button">Connect to EasyLap Device</button>
+        <div id="console"></div>
+    </div>
 
-  <script>
-    const EASYLAP_VID = 0x10C4; // Silicon Labs
-    const EASYLAP_PID = 0x86B9; // EasyLAP
+    <script>
+        const EASYLAP_PID = 0x86B9;
+        let device = null;
+        let reader = null;
+        const consoleDiv = document.getElementById('console');
+        const connectButton = document.getElementById('connectButton');
 
-    let device = null;
-    let readLoopActive = false;
-    const logDiv = document.getElementById('log');
+        function log(message, type = '') {
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type ? ` class="${type}"` : '';
+            consoleDiv.innerHTML += `<div${className}>[${timestamp}] ${message}</div>`;
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+            console.log(`[${timestamp}] ${message}`);
+        }
 
-    document.getElementById('connectButton').addEventListener('click', async () => {
-      try {
-        const devices = await navigator.hid.requestDevice({
-          filters: [{ vendorId: EASYLAP_VID, productId: EASYLAP_PID }]
+        function logDebug(message) {
+            log(message, 'debug');
+        }
+
+        function logError(message) {
+            log(message, 'error');
+        }
+
+        function logSuccess(message) {
+            log(message, 'success');
+        }
+
+        function arrayToHex(array) {
+            return Array.from(array)
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join(' ');
+        }
+
+        async function connectToDevice() {
+            try {
+                logDebug('Requesting EasyLap device...');
+                const devices = await navigator.hid.requestDevice({
+                    filters: [{ vendorId: 0x10C4, productId: EASYLAP_PID }]
+                });
+
+                if (devices.length === 0) {
+                    logError('No device selected');
+                    return;
+                }
+
+                device = devices[0];
+                logDebug(`Selected device: ${device.productName}`);
+                await device.open();
+                logSuccess('Connected to EasyLap device');
+
+                // Configure UART
+                const uartConfig = new Uint8Array([
+                    0x41, // Set UART Config
+                    0x00, // Baud rate (38400)
+                    0x00, // Parity (None)
+                    0x00, // Flow control (Disabled)
+                    0x08, // Data bits (8)
+                    0x00  // Stop bits (1)
+                ]);
+                logDebug(`Sending UART config: ${arrayToHex(uartConfig)}`);
+                await device.sendFeatureReport(0x41, uartConfig);
+                logSuccess('UART configured successfully');
+
+                // Enable UART
+                const enableUart = new Uint8Array([0x01]);
+                logDebug(`Enabling UART: ${arrayToHex(enableUart)}`);
+                await device.sendFeatureReport(0x50, enableUart);
+                logSuccess('UART enabled');
+
+                // Start reading data
+                startReading();
+                connectButton.disabled = true;
+            } catch (error) {
+                logError(`Error connecting to device: ${error.message}`);
+                console.error('Connection error details:', error);
+            }
+        }
+
+        async function startReading() {
+            try {
+                logDebug('Starting to read data from device...');
+                while (device) {
+                    const report = await device.receiveFeatureReport(0x50);
+                    logDebug(`Received raw data: ${arrayToHex(report)}`);
+                    processData(report);
+                }
+            } catch (error) {
+                logError(`Error reading data: ${error.message}`);
+                console.error('Reading error details:', error);
+                device = null;
+                connectButton.disabled = false;
+            }
+        }
+
+        function processData(data) {
+            if (!data || data.length === 0) {
+                logDebug('Received empty data packet');
+                return;
+            }
+
+            const buf = new Uint8Array(data);
+            logDebug(`Processing packet type: 0x${buf[0].toString(16)}`);
+            
+            if (buf[0] === 0x0B) { // Timer packet
+                logDebug('Processing timer packet');
+                if (buf.length >= 3 && buf[2] !== 0x83) {
+                    logDebug(`Invalid timer packet marker: 0x${buf[2].toString(16)}`);
+                    return;
+                }
+                if (buf.length >= 0x0B) {
+                    const timerValue = (buf[3] | (buf[4] << 8) | (buf[5] << 16) | (buf[6] << 24));
+                    logSuccess(`Timer: ${timerValue}`);
+                    logDebug(`Timer bytes: ${arrayToHex(buf.slice(3, 7))}`);
+                } else {
+                    logDebug(`Incomplete timer packet: ${buf.length} bytes`);
+                }
+            } else if (buf[0] === 0x0D) { // Car packet
+                logDebug('Processing car packet');
+                if (buf.length >= 3 && buf[2] !== 0x84) {
+                    logDebug(`Invalid car packet marker: 0x${buf[2].toString(16)}`);
+                    return;
+                }
+                if (buf.length >= 0x0D) {
+                    const uid = (buf[3] | (buf[4] << 8));
+                    const timerValue = (buf[7] | (buf[8] << 8) | (buf[9] << 16) | (buf[10] << 24));
+                    logSuccess(`Car ${uid}: ${timerValue}`);
+                    logDebug(`Car ID bytes: ${arrayToHex(buf.slice(3, 5))}`);
+                    logDebug(`Timer bytes: ${arrayToHex(buf.slice(7, 11))}`);
+                } else {
+                    logDebug(`Incomplete car packet: ${buf.length} bytes`);
+                }
+            } else {
+                logDebug(`Unknown packet type: 0x${buf[0].toString(16)}`);
+            }
+        }
+
+        // Handle device disconnection
+        navigator.hid.addEventListener('disconnect', (event) => {
+            if (event.device === device) {
+                logError('Device disconnected');
+                device = null;
+                connectButton.disabled = false;
+            }
         });
 
-        if (devices.length === 0) {
-          log('No device selected.');
-          return;
-        }
-
-        device = devices[0];
-        await device.open();
-        log('Connected to EasyLAP');
-
-        await configureUART(device);
-        startReadLoop(handlePacket);
-      } catch (err) {
-        log('Error: ' + err.message);
-      }
-    });
-
-async function configureUART(device) {
-  const enable = new Uint8Array([0x41, 0x01]); // Enable UART
-
-  try {
-    await device.sendFeatureReport(0x41, enable.slice(1));
-    console.log("✅ UART enabled (default config)");
-  } catch (error) {
-    console.error("❌ UART enable failed:", error);
-  }
-}
-
-    function startReadLoop(callback) {
-      const buf = [];
-
-      if (readLoopActive) return;
-      readLoopActive = true;
-
-      device.addEventListener('inputreport', (event) => {
-        const bytes = [...new Uint8Array(event.data.buffer)];
-            // 🐛 DEBUG: print raw received bytes
-    console.log('Raw input:', bytes.map(b => b.toString(16).padStart(2, '0')).join(' '));
-
-        buf.push(...bytes);
-        parseBuffer(buf, callback);
-      });
-    }
-
-    function parseBuffer(buf, callback) {
-      while (buf.length > 0) {
-        if (buf[0] === 0x0B) {
-          if (buf.length >= 3 && buf[2] !== 0x83) {
-            buf.shift();
-          } else if (buf.length >= 12) {
-            const t = parseTimer(buf.slice(3, 7));
-            callback({ t, c: null });
-            buf.splice(0, 12);
-          } else {
-            break;
-          }
-        } else if (buf[0] === 0x0D) {
-          if (buf.length >= 3 && buf[2] !== 0x84) {
-            buf.shift();
-          } else if (buf.length >= 14) {
-            const c = buf[3] | (buf[4] << 8);
-            const t = parseTimer(buf.slice(7, 11));
-            callback({ t, c });
-            buf.splice(0, 14);
-          } else {
-            break;
-          }
-        } else {
-          buf.shift();
-        }
-      }
-    }
-
-    function parseTimer(bytes) {
-      // Convert 4 bytes to unsigned integer
-      return bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24);
-    }
-
-    function handlePacket({ t, c }) {
-      const time = t.toString().padStart(8, '0');
-      if (c === null) {
-        log(`Timer sync: t=${time}`);
-      } else {
-        log(`Car ${c}: t=${time}`);
-      }
-    }
-
-    function log(text) {
-      console.log(text);
-      logDiv.textContent += text + '\n';
-      logDiv.scrollTop = logDiv.scrollHeight;
-    }
-  </script>
+        connectButton.addEventListener('click', connectToDevice);
+    </script>
 </body>
 </html>
