@@ -183,32 +183,31 @@
           await device.open();
           logSuccess("Connected to EasyLap device");
 
-          // Get current UART configuration
-          logDebug("Reading current UART configuration...");
-          const currentConfig = await getCurrentUartConfig();
+          // // Get current UART configuration
+          // logDebug("Reading current UART configuration...");
+          // const currentConfig = await getCurrentUartConfig();
 
           // Configure UART
           const uartConfig = new Uint8Array([
-            UART_CONFIG_REPORT_ID,
             (UART_CONFIG.BAUD_RATE >> 24) & 0xff,
             (UART_CONFIG.BAUD_RATE >> 16) & 0xff,
             (UART_CONFIG.BAUD_RATE >> 8) & 0xff,
             UART_CONFIG.BAUD_RATE & 0xff,
             UART_CONFIG.PARITY,
             UART_CONFIG.FLOW_CONTROL,
-            UART_CONFIG.DATA_BITS,
+            0x03,
             UART_CONFIG.STOP_BITS
           ]);
           logDebug(`Sending new UART config: ${arrayToHex(uartConfig)}`);
           await device.sendFeatureReport(UART_CONFIG_REPORT_ID, uartConfig);
           logSuccess("UART configured successfully");
 
-          // Verify new configuration
-          logDebug("Verifying new UART configuration...");
-          const newConfig = await getCurrentUartConfig();
+          // // Verify new configuration
+          // logDebug("Verifying new UART configuration...");
+          // const newConfig = await getCurrentUartConfig();
 
           // Enable UART
-          const enableUart = new Uint8Array([UART_ENABLE_REPORT_ID, 0x01]);
+          const enableUart = new Uint8Array([0x01]);
           logDebug(`Enabling UART: ${arrayToHex(enableUart)}`);
           await device.sendFeatureReport(UART_ENABLE_REPORT_ID, enableUart);
           logSuccess("UART enabled");
