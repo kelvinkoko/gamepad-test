@@ -226,6 +226,12 @@
       function handleInputReport(event) {
         try {
           const data = new Uint8Array(event.data.buffer);
+          logDebug(
+            `Received input report data length: ${event.data.byteLength}`
+          );
+          logDebug(
+            `Received input report data offset: ${event.data.byteOffset}`
+          );
           logDebug(`Received input report: ${arrayToHex(data)}`);
 
           // Add new data to buffer
