@@ -183,9 +183,9 @@
           await device.open();
           logSuccess("Connected to EasyLap device");
 
-          // // Get current UART configuration
-          // logDebug("Reading current UART configuration...");
-          // const currentConfig = await getCurrentUartConfig();
+          // Get current UART configuration
+          logDebug("Reading current UART configuration...");
+          const currentConfig = await getCurrentUartConfig();
 
           // Configure UART
           const uartConfig = new Uint8Array([
@@ -202,9 +202,9 @@
           await device.sendFeatureReport(UART_CONFIG_REPORT_ID, uartConfig);
           logSuccess("UART configured successfully");
 
-          // // Verify new configuration
-          // logDebug("Verifying new UART configuration...");
-          // const newConfig = await getCurrentUartConfig();
+          // Verify new configuration
+          logDebug("Verifying new UART configuration...");
+          const newConfig = await getCurrentUartConfig();
 
           // Enable UART
           const enableUart = new Uint8Array([0x01]);
@@ -242,82 +242,63 @@
 
       function processBuffer() {
         while (dataBuffer.length > 0) {
-          const packetType = dataBuffer[0];
+          // Need at least 1 byte to determine packet type and length
+          if (dataBuffer.length < 1) {
+            return;
+          }
 
-          if (packetType === 0x0b) {
+          const packetLength = dataBuffer[0];
+
+          // Check if we have enough data for the complete packet
+          if (dataBuffer.length < packetLength) {
+            logDebug(
+              `Waiting for complete packet. Need ${packetLength} bytes, have ${dataBuffer.length}`
+            );
+            return;
+          }
+
+          // Extract the complete packet
+          const packet = dataBuffer.slice(0, packetLength);
+
+          // Process based on packet type
+          if (packet[2] === 0x83) {
             // Timer packet
-            if (dataBuffer.length < 3) {
-              logDebug("Waiting for more data for timer packet...");
-              return;
-            }
-
-            if (dataBuffer[2] !== 0x83) {
-              logDebug(
-                `Invalid timer packet marker: 0x${dataBuffer[2].toString(
-                  16
-                )}, discarding first byte`
-              );
-              dataBuffer = dataBuffer.slice(1);
-              continue;
-            }
-
-            if (dataBuffer.length < 0x0b) {
-              logDebug("Waiting for complete timer packet...");
-              return;
-            }
-
             const timerValue =
-              dataBuffer[3] |
-              (dataBuffer[4] << 8) |
-              (dataBuffer[5] << 16) |
-              (dataBuffer[6] << 24);
+              packet[3] |
+              (packet[4] << 8) |
+              (packet[5] << 16) |
+              (packet[6] << 24);
             logSuccess(`Timer: ${timerValue}`);
-            logDebug(`Timer bytes: ${arrayToHex(dataBuffer.slice(3, 7))}`);
-
-            // Remove processed packet
-            dataBuffer = dataBuffer.slice(0x0b + 1);
-          } else if (packetType === 0x0d) {
+            logDebug(`Timer bytes: ${arrayToHex(packet.slice(3, 7))}`);
+            logDebug(`Unknown bytes: ${arrayToHex(packet.slice(7, 11))}`);
+          } else if (packet[2] === 0x84) {
             // Car packet
-            if (dataBuffer.length < 3) {
-              logDebug("Waiting for more data for car packet...");
-              return;
-            }
-
-            if (dataBuffer[2] !== 0x84) {
-              logDebug(
-                `Invalid car packet marker: 0x${dataBuffer[2].toString(
-                  16
-                )}, discarding first byte`
-              );
-              dataBuffer = dataBuffer.slice(1);
-              continue;
-            }
-
-            if (dataBuffer.length < 0x0d) {
-              logDebug("Waiting for complete car packet...");
-              return;
-            }
-
-            const uid = dataBuffer[3] | (dataBuffer[4] << 8);
+            const uid = packet[3] | (packet[4] << 8);
             const timerValue =
-              dataBuffer[7] |
-              (dataBuffer[8] << 8) |
-              (dataBuffer[9] << 16) |
-              (dataBuffer[10] << 24);
-            logSuccess(`Car ${uid}: ${timerValue}`);
-            logDebug(`Car ID bytes: ${arrayToHex(dataBuffer.slice(3, 5))}`);
-            logDebug(`Timer bytes: ${arrayToHex(dataBuffer.slice(7, 11))}`);
+              packet[7] |
+              (packet[8] << 8) |
+              (packet[9] << 16) |
+              (packet[10] << 24);
+            const hits = packet[11];
+            const signalStrength = packet[12];
 
-            // Remove processed packet
-            dataBuffer = dataBuffer.slice(0x0d + 1);
+            logSuccess(`Car ${uid}: ${timerValue}`);
+            logDebug(`Car ID bytes: ${arrayToHex(packet.slice(3, 5))}`);
+            logDebug(`Unknown bytes: ${arrayToHex(packet.slice(5, 7))}`);
+            logDebug(`Timer bytes: ${arrayToHex(packet.slice(7, 11))}`);
+            logDebug(`Hits: ${hits}, Signal Strength: ${signalStrength}`);
           } else {
             logDebug(
-              `Unknown packet type: 0x${packetType.toString(
+              `Unknown packet type: 0x${packet[2].toString(
                 16
               )}, discarding first byte`
             );
             dataBuffer = dataBuffer.slice(1);
+            continue;
           }
+
+          // Remove the processed packet from the buffer
+          dataBuffer = dataBuffer.slice(packetLength);
         }
       }
 
