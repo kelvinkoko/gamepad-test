@@ -208,7 +208,7 @@
           const newConfig = await getCurrentUartConfig();
 
           // Enable UART
-          const enableUart = new Uint8Array([0x01]);
+          const enableUart = new Uint8Array([UART_ENABLE_REPORT_ID, 0x01]);
           logDebug(`Enabling UART: ${arrayToHex(enableUart)}`);
           await device.sendFeatureReport(UART_ENABLE_REPORT_ID, enableUart);
           logSuccess("UART enabled");
