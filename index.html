@@ -220,25 +220,20 @@
           const data = new Uint8Array(event.data.buffer);
           logDebug(`Raw input report: ${arrayToHex(data)}`);
 
-          // On Windows, the data might be padded with zeros
-          // We need to find the actual data length by looking for the packet length byte
+          // Filter out trailing zeros (common on Windows where reports are padded)
           let actualData = data;
           if (data.length > 0) {
-            // Find the first non-zero byte that could be a valid packet length
-            let startIndex = 0;
-            while (
-              startIndex < data.length &&
-              (data[startIndex] === 0 ||
-                (data[startIndex] !== 0x0b && data[startIndex] !== 0x0d))
-            ) {
-              startIndex++;
+            // Find the last non-zero byte
+            let lastNonZero = data.length - 1;
+            while (lastNonZero >= 0 && data[lastNonZero] === 0) {
+              lastNonZero--;
             }
-
-            if (startIndex < data.length) {
-              actualData = data.slice(startIndex);
+            // If we found any non-zero bytes, slice the array
+            if (lastNonZero >= 0) {
+              actualData = data.slice(0, lastNonZero + 1);
               logDebug(`Trimmed to actual data: ${arrayToHex(actualData)}`);
             } else {
-              logDebug("No valid packet start found in this report");
+              logDebug("No non-zero data in this report");
               return;
             }
           }
