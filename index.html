@@ -137,7 +137,7 @@
 
           // Configure UART
           const uartConfig = new Uint8Array([
-            UART_CONFIG_REPORT_ID, // Set UART Config
+            // UART_CONFIG_REPORT_ID, // Set UART Config
             UART_CONFIG.BAUD_RATE & 0xff,
             (UART_CONFIG.BAUD_RATE >> 8) & 0xff,
             (UART_CONFIG.BAUD_RATE >> 16) & 0xff,
