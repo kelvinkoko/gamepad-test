@@ -228,17 +228,8 @@
           const data = new Uint8Array(event.data.buffer);
           logDebug(`Received input report: ${arrayToHex(data)}`);
 
-          // Remove trailing zeros
-          let actualData = data;
-          while (
-            actualData.length > 0 &&
-            actualData[actualData.length - 1] === 0
-          ) {
-            actualData = actualData.slice(0, -1);
-          }
-
           // Add new data to buffer
-          dataBuffer.push(...actualData);
+          dataBuffer.push(...data);
           logDebug(`Current buffer size: ${dataBuffer.length} bytes`);
 
           // Process complete packets
