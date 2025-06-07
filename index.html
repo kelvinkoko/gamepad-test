@@ -79,6 +79,9 @@
       const consoleDiv = document.getElementById("console");
       const connectButton = document.getElementById("connectButton");
 
+      const UART_CONFIG_REPORT_ID = 0x50;
+      const UART_ENABLE_REPORT_ID = 0x41;
+
       // CP2110 UART Configuration Constants
       const UART_CONFIG = {
         BAUD_RATE: 38400,
@@ -134,7 +137,7 @@
 
           // Configure UART
           const uartConfig = new Uint8Array([
-            0x41, // Set UART Config
+            UART_CONFIG_REPORT_ID, // Set UART Config
             UART_CONFIG.BAUD_RATE & 0xff,
             (UART_CONFIG.BAUD_RATE >> 8) & 0xff,
             (UART_CONFIG.BAUD_RATE >> 16) & 0xff,
@@ -145,13 +148,13 @@
             UART_CONFIG.STOP_BITS
           ]);
           logDebug(`Sending UART config: ${arrayToHex(uartConfig)}`);
-          await device.sendFeatureReport(0x41, uartConfig);
+          await device.sendFeatureReport(UART_CONFIG_REPORT_ID, uartConfig);
           logSuccess("UART configured successfully");
 
           // Enable UART
           const enableUart = new Uint8Array([0x01]);
           logDebug(`Enabling UART: ${arrayToHex(enableUart)}`);
-          await device.sendFeatureReport(0x50, enableUart);
+          await device.sendFeatureReport(UART_ENABLE_REPORT_ID, enableUart);
           logSuccess("UART enabled");
 
           // Set up input report listener
