@@ -183,6 +183,10 @@
           await device.open();
           logSuccess("Connected to EasyLap device");
 
+          // // Get current UART configuration
+          // logDebug("Reading current UART configuration...");
+          // const currentConfig = await getCurrentUartConfig();
+
           // Configure UART
           const uartConfig = new Uint8Array([
             (UART_CONFIG.BAUD_RATE >> 24) & 0xff,
@@ -197,6 +201,10 @@
           logDebug(`Sending new UART config: ${arrayToHex(uartConfig)}`);
           await device.sendFeatureReport(UART_CONFIG_REPORT_ID, uartConfig);
           logSuccess("UART configured successfully");
+
+          // // Verify new configuration
+          // logDebug("Verifying new UART configuration...");
+          // const newConfig = await getCurrentUartConfig();
 
           // Enable UART
           const enableUart = new Uint8Array([0x01]);
@@ -218,24 +226,15 @@
       function handleInputReport(event) {
         try {
           const data = new Uint8Array(event.data.buffer);
-          logDebug(`Raw input report: ${arrayToHex(data)}`);
+          logDebug(`Received input report: ${arrayToHex(data)}`);
 
-          // Filter out trailing zeros (common on Windows where reports are padded)
+          // Remove trailing zeros
           let actualData = data;
-          if (data.length > 0) {
-            // Find the last non-zero byte
-            let lastNonZero = data.length - 1;
-            while (lastNonZero >= 0 && data[lastNonZero] === 0) {
-              lastNonZero--;
-            }
-            // If we found any non-zero bytes, slice the array
-            if (lastNonZero >= 0) {
-              actualData = data.slice(0, lastNonZero + 1);
-              logDebug(`Trimmed to actual data: ${arrayToHex(actualData)}`);
-            } else {
-              logDebug("No non-zero data in this report");
-              return;
-            }
+          while (
+            actualData.length > 0 &&
+            actualData[actualData.length - 1] === 0
+          ) {
+            actualData = actualData.slice(0, -1);
           }
 
           // Add new data to buffer
@@ -250,88 +249,84 @@
         }
       }
 
-      function calculateChecksum(data) {
-        let sum = 0;
-        for (let i = 0; i < data.length; i++) {
-          sum += data[i];
-        }
-        return sum & 0xff;
-      }
-
       function processBuffer() {
         while (dataBuffer.length > 0) {
-          // Need at least 1 byte to determine packet length
-          if (dataBuffer.length < 1) return;
+          const packetType = dataBuffer[0];
 
-          const packetLength = dataBuffer[0];
+          if (packetType === 0x0b) {
+            // Timer packet
+            if (dataBuffer.length < 3) {
+              logDebug("Waiting for more data for timer packet...");
+              return;
+            }
 
-          // Validate packet length
-          if (packetLength !== 0x0b && packetLength !== 0x0d) {
+            if (dataBuffer[2] !== 0x83) {
+              logDebug(
+                `Invalid timer packet marker: 0x${dataBuffer[2].toString(
+                  16
+                )}, discarding first byte`
+              );
+              dataBuffer = dataBuffer.slice(1);
+              continue;
+            }
+
+            if (dataBuffer.length < 0x0b) {
+              logDebug("Waiting for complete timer packet...");
+              return;
+            }
+
+            const timerValue =
+              dataBuffer[3] |
+              (dataBuffer[4] << 8) |
+              (dataBuffer[5] << 16) |
+              (dataBuffer[6] << 24);
+            logSuccess(`Timer: ${timerValue}`);
+            logDebug(`Timer bytes: ${arrayToHex(dataBuffer.slice(3, 7))}`);
+
+            // Remove processed packet
+            dataBuffer = dataBuffer.slice(0x0b + 1);
+          } else if (packetType === 0x0d) {
+            // Car packet
+            if (dataBuffer.length < 3) {
+              logDebug("Waiting for more data for car packet...");
+              return;
+            }
+
+            if (dataBuffer[2] !== 0x84) {
+              logDebug(
+                `Invalid car packet marker: 0x${dataBuffer[2].toString(
+                  16
+                )}, discarding first byte`
+              );
+              dataBuffer = dataBuffer.slice(1);
+              continue;
+            }
+
+            if (dataBuffer.length < 0x0d) {
+              logDebug("Waiting for complete car packet...");
+              return;
+            }
+
+            const uid = dataBuffer[3] | (dataBuffer[4] << 8);
+            const timerValue =
+              dataBuffer[7] |
+              (dataBuffer[8] << 8) |
+              (dataBuffer[9] << 16) |
+              (dataBuffer[10] << 24);
+            logSuccess(`Car ${uid}: ${timerValue}`);
+            logDebug(`Car ID bytes: ${arrayToHex(dataBuffer.slice(3, 5))}`);
+            logDebug(`Timer bytes: ${arrayToHex(dataBuffer.slice(7, 11))}`);
+
+            // Remove processed packet
+            dataBuffer = dataBuffer.slice(0x0d + 1);
+          } else {
             logDebug(
-              `Invalid packet length: 0x${packetLength.toString(
+              `Unknown packet type: 0x${packetType.toString(
                 16
               )}, discarding first byte`
             );
             dataBuffer = dataBuffer.slice(1);
-            continue;
           }
-
-          // Check if we have enough data for the complete packet
-          if (dataBuffer.length < packetLength) {
-            logDebug(
-              `Waiting for complete packet (need ${packetLength} bytes, have ${dataBuffer.length})`
-            );
-            return;
-          }
-
-          // Extract the complete packet
-          const packet = dataBuffer.slice(0, packetLength);
-
-          // Verify checksum
-          const calculatedChecksum = calculateChecksum(packet.slice(0, -1));
-          const receivedChecksum = packet[1];
-
-          if (calculatedChecksum !== receivedChecksum) {
-            logError(
-              `Checksum mismatch: calculated 0x${calculatedChecksum.toString(
-                16
-              )}, received 0x${receivedChecksum.toString(16)}`
-            );
-            dataBuffer = dataBuffer.slice(1);
-            continue;
-          }
-
-          // Process based on packet type
-          if (packet[2] === 0x83) {
-            // Timer packet
-            const timerValue =
-              packet[3] |
-              (packet[4] << 8) |
-              (packet[5] << 16) |
-              (packet[6] << 24);
-            logSuccess(`Timer: ${timerValue}`);
-            logDebug(`Timer bytes: ${arrayToHex(packet.slice(3, 7))}`);
-          } else if (packet[2] === 0x84) {
-            // Car packet
-            const uid = packet[3] | (packet[4] << 8);
-            const timerValue =
-              packet[7] |
-              (packet[8] << 8) |
-              (packet[9] << 16) |
-              (packet[10] << 24);
-            const hits = packet[11];
-            const signalStrength = packet[12];
-            logSuccess(
-              `Car ${uid}: ${timerValue} (Hits: ${hits}, Signal: ${signalStrength})`
-            );
-            logDebug(`Car ID bytes: ${arrayToHex(packet.slice(3, 5))}`);
-            logDebug(`Timer bytes: ${arrayToHex(packet.slice(7, 11))}`);
-          } else {
-            logDebug(`Unknown packet type: 0x${packet[2].toString(16)}`);
-          }
-
-          // Remove processed packet
-          dataBuffer = dataBuffer.slice(packetLength);
         }
       }
 
