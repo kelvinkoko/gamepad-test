@@ -183,10 +183,6 @@
           await device.open();
           logSuccess("Connected to EasyLap device");
 
-          // Get current UART configuration
-          logDebug("Reading current UART configuration...");
-          const currentConfig = await getCurrentUartConfig();
-
           // Configure UART
           const uartConfig = new Uint8Array([
             (UART_CONFIG.BAUD_RATE >> 24) & 0xff,
@@ -201,10 +197,6 @@
           logDebug(`Sending new UART config: ${arrayToHex(uartConfig)}`);
           await device.sendFeatureReport(UART_CONFIG_REPORT_ID, uartConfig);
           logSuccess("UART configured successfully");
-
-          // Verify new configuration
-          logDebug("Verifying new UART configuration...");
-          const newConfig = await getCurrentUartConfig();
 
           // Enable UART
           const enableUart = new Uint8Array([0x01]);
@@ -226,10 +218,33 @@
       function handleInputReport(event) {
         try {
           const data = new Uint8Array(event.data.buffer);
-          logDebug(`Received input report: ${arrayToHex(data)}`);
+          logDebug(`Raw input report: ${arrayToHex(data)}`);
+
+          // On Windows, the data might be padded with zeros
+          // We need to find the actual data length by looking for the packet length byte
+          let actualData = data;
+          if (data.length > 0) {
+            // Find the first non-zero byte that could be a valid packet length
+            let startIndex = 0;
+            while (
+              startIndex < data.length &&
+              (data[startIndex] === 0 ||
+                (data[startIndex] !== 0x0b && data[startIndex] !== 0x0d))
+            ) {
+              startIndex++;
+            }
+
+            if (startIndex < data.length) {
+              actualData = data.slice(startIndex);
+              logDebug(`Trimmed to actual data: ${arrayToHex(actualData)}`);
+            } else {
+              logDebug("No valid packet start found in this report");
+              return;
+            }
+          }
 
           // Add new data to buffer
-          dataBuffer.push(...data);
+          dataBuffer.push(...actualData);
           logDebug(`Current buffer size: ${dataBuffer.length} bytes`);
 
           // Process complete packets
@@ -240,25 +255,56 @@
         }
       }
 
+      function calculateChecksum(data) {
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          sum += data[i];
+        }
+        return sum & 0xff;
+      }
+
       function processBuffer() {
         while (dataBuffer.length > 0) {
-          // Need at least 1 byte to determine packet type and length
-          if (dataBuffer.length < 1) {
-            return;
-          }
+          // Need at least 1 byte to determine packet length
+          if (dataBuffer.length < 1) return;
 
           const packetLength = dataBuffer[0];
+
+          // Validate packet length
+          if (packetLength !== 0x0b && packetLength !== 0x0d) {
+            logDebug(
+              `Invalid packet length: 0x${packetLength.toString(
+                16
+              )}, discarding first byte`
+            );
+            dataBuffer = dataBuffer.slice(1);
+            continue;
+          }
 
           // Check if we have enough data for the complete packet
           if (dataBuffer.length < packetLength) {
             logDebug(
-              `Waiting for complete packet. Need ${packetLength} bytes, have ${dataBuffer.length}`
+              `Waiting for complete packet (need ${packetLength} bytes, have ${dataBuffer.length})`
             );
             return;
           }
 
           // Extract the complete packet
           const packet = dataBuffer.slice(0, packetLength);
+
+          // Verify checksum
+          const calculatedChecksum = calculateChecksum(packet.slice(0, -1));
+          const receivedChecksum = packet[1];
+
+          if (calculatedChecksum !== receivedChecksum) {
+            logError(
+              `Checksum mismatch: calculated 0x${calculatedChecksum.toString(
+                16
+              )}, received 0x${receivedChecksum.toString(16)}`
+            );
+            dataBuffer = dataBuffer.slice(1);
+            continue;
+          }
 
           // Process based on packet type
           if (packet[2] === 0x83) {
@@ -270,7 +316,6 @@
               (packet[6] << 24);
             logSuccess(`Timer: ${timerValue}`);
             logDebug(`Timer bytes: ${arrayToHex(packet.slice(3, 7))}`);
-            logDebug(`Unknown bytes: ${arrayToHex(packet.slice(7, 11))}`);
           } else if (packet[2] === 0x84) {
             // Car packet
             const uid = packet[3] | (packet[4] << 8);
@@ -281,23 +326,16 @@
               (packet[10] << 24);
             const hits = packet[11];
             const signalStrength = packet[12];
-
-            logSuccess(`Car ${uid}: ${timerValue}`);
-            logDebug(`Car ID bytes: ${arrayToHex(packet.slice(3, 5))}`);
-            logDebug(`Unknown bytes: ${arrayToHex(packet.slice(5, 7))}`);
-            logDebug(`Timer bytes: ${arrayToHex(packet.slice(7, 11))}`);
-            logDebug(`Hits: ${hits}, Signal Strength: ${signalStrength}`);
-          } else {
-            logDebug(
-              `Unknown packet type: 0x${packet[2].toString(
-                16
-              )}, discarding first byte`
+            logSuccess(
+              `Car ${uid}: ${timerValue} (Hits: ${hits}, Signal: ${signalStrength})`
             );
-            dataBuffer = dataBuffer.slice(1);
-            continue;
+            logDebug(`Car ID bytes: ${arrayToHex(packet.slice(3, 5))}`);
+            logDebug(`Timer bytes: ${arrayToHex(packet.slice(7, 11))}`);
+          } else {
+            logDebug(`Unknown packet type: 0x${packet[2].toString(16)}`);
           }
 
-          // Remove the processed packet from the buffer
+          // Remove processed packet
           dataBuffer = dataBuffer.slice(packetLength);
         }
       }
