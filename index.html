@@ -75,6 +75,7 @@
     <script>
       const EASYLAP_PID = 0x86b9;
       let device = null;
+      let dataBuffer = [];
       const consoleDiv = document.getElementById("console");
       const connectButton = document.getElementById("connectButton");
 
@@ -156,56 +157,97 @@
         try {
           const data = new Uint8Array(event.data.buffer);
           logDebug(`Received input report: ${arrayToHex(data)}`);
-          processData(data);
+
+          // Add new data to buffer
+          dataBuffer.push(...data);
+          logDebug(`Current buffer size: ${dataBuffer.length} bytes`);
+
+          // Process complete packets
+          processBuffer();
         } catch (error) {
           logError(`Error processing input report: ${error.message}`);
           console.error("Input report error details:", error);
         }
       }
 
-      function processData(data) {
-        if (!data || data.length === 0) {
-          logDebug("Received empty data packet");
-          return;
-        }
+      function processBuffer() {
+        while (dataBuffer.length > 0) {
+          const packetType = dataBuffer[0];
 
-        const buf = new Uint8Array(data);
-        logDebug(`Processing packet type: 0x${buf[0].toString(16)}`);
+          if (packetType === 0x0b) {
+            // Timer packet
+            if (dataBuffer.length < 3) {
+              logDebug("Waiting for more data for timer packet...");
+              return;
+            }
 
-        if (buf[0] === 0x0b) {
-          // Timer packet
-          logDebug("Processing timer packet");
-          if (buf.length >= 3 && buf[2] !== 0x83) {
-            logDebug(`Invalid timer packet marker: 0x${buf[2].toString(16)}`);
-            return;
-          }
-          if (buf.length >= 0x0b) {
+            if (dataBuffer[2] !== 0x83) {
+              logDebug(
+                `Invalid timer packet marker: 0x${dataBuffer[2].toString(
+                  16
+                )}, discarding first byte`
+              );
+              dataBuffer = dataBuffer.slice(1);
+              continue;
+            }
+
+            if (dataBuffer.length < 0x0b) {
+              logDebug("Waiting for complete timer packet...");
+              return;
+            }
+
             const timerValue =
-              buf[3] | (buf[4] << 8) | (buf[5] << 16) | (buf[6] << 24);
+              dataBuffer[3] |
+              (dataBuffer[4] << 8) |
+              (dataBuffer[5] << 16) |
+              (dataBuffer[6] << 24);
             logSuccess(`Timer: ${timerValue}`);
-            logDebug(`Timer bytes: ${arrayToHex(buf.slice(3, 7))}`);
-          } else {
-            logDebug(`Incomplete timer packet: ${buf.length} bytes`);
-          }
-        } else if (buf[0] === 0x0d) {
-          // Car packet
-          logDebug("Processing car packet");
-          if (buf.length >= 3 && buf[2] !== 0x84) {
-            logDebug(`Invalid car packet marker: 0x${buf[2].toString(16)}`);
-            return;
-          }
-          if (buf.length >= 0x0d) {
-            const uid = buf[3] | (buf[4] << 8);
+            logDebug(`Timer bytes: ${arrayToHex(dataBuffer.slice(3, 7))}`);
+
+            // Remove processed packet
+            dataBuffer = dataBuffer.slice(0x0b + 1);
+          } else if (packetType === 0x0d) {
+            // Car packet
+            if (dataBuffer.length < 3) {
+              logDebug("Waiting for more data for car packet...");
+              return;
+            }
+
+            if (dataBuffer[2] !== 0x84) {
+              logDebug(
+                `Invalid car packet marker: 0x${dataBuffer[2].toString(
+                  16
+                )}, discarding first byte`
+              );
+              dataBuffer = dataBuffer.slice(1);
+              continue;
+            }
+
+            if (dataBuffer.length < 0x0d) {
+              logDebug("Waiting for complete car packet...");
+              return;
+            }
+
+            const uid = dataBuffer[3] | (dataBuffer[4] << 8);
             const timerValue =
-              buf[7] | (buf[8] << 8) | (buf[9] << 16) | (buf[10] << 24);
+              dataBuffer[7] |
+              (dataBuffer[8] << 8) |
+              (dataBuffer[9] << 16) |
+              (dataBuffer[10] << 24);
             logSuccess(`Car ${uid}: ${timerValue}`);
-            logDebug(`Car ID bytes: ${arrayToHex(buf.slice(3, 5))}`);
-            logDebug(`Timer bytes: ${arrayToHex(buf.slice(7, 11))}`);
+            logDebug(`Car ID bytes: ${arrayToHex(dataBuffer.slice(3, 5))}`);
+            logDebug(`Timer bytes: ${arrayToHex(dataBuffer.slice(7, 11))}`);
+
+            // Remove processed packet
+            dataBuffer = dataBuffer.slice(0x0d + 1);
           } else {
-            logDebug(`Incomplete car packet: ${buf.length} bytes`);
+            logDebug(
+              `Unknown packet type: 0x${packetType.toString(
+                16
+              )}, discarding first byte`
+            );
+            dataBuffer = dataBuffer.slice(1);
           }
-        } else {
-          logDebug(`Unknown packet type: 0x${buf[0].toString(16)}`);
         }
       }
 
@@ -217,6 +259,7 @@
             device.removeEventListener("inputreport", handleInputReport);
           }
           device = null;
+          dataBuffer = [];
           connectButton.disabled = false;
         }
       });
