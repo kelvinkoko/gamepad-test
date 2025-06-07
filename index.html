@@ -118,6 +118,54 @@
           .join(" ");
       }
 
+      function parseUartConfig(data) {
+        if (!data || data.length < 9) {
+          return null;
+        }
+
+        const baudRate =
+          (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+        return {
+          baudRate: baudRate,
+          parity: data[4],
+          flowControl: data[5],
+          dataBits: data[6],
+          stopBits: data[7]
+        };
+      }
+
+      function displayUartConfig(config) {
+        if (!config) {
+          logError("Invalid UART configuration data");
+          return;
+        }
+
+        logDebug("Current UART Configuration:");
+        logDebug(`  Baud Rate: ${config.baudRate}`);
+        logDebug(`  Parity: ${config.parity === 0 ? "None" : config.parity}`);
+        logDebug(
+          `  Flow Control: ${
+            config.flowControl === 0 ? "Disabled" : config.flowControl
+          }`
+        );
+        logDebug(`  Data Bits: ${config.dataBits}`);
+        logDebug(`  Stop Bits: ${config.stopBits === 0 ? "Short" : "Long"}`);
+      }
+
+      async function getCurrentUartConfig() {
+        try {
+          const data = await device.receiveFeatureReport(UART_CONFIG_REPORT_ID);
+          const config = parseUartConfig(data);
+          if (config) {
+            displayUartConfig(config);
+          }
+          return config;
+        } catch (error) {
+          logError(`Error getting UART config: ${error.message}`);
+          return null;
+        }
+      }
+
       async function connectToDevice() {
         try {
           logDebug("Requesting EasyLap device...");
@@ -135,9 +183,12 @@
           await device.open();
           logSuccess("Connected to EasyLap device");
 
+          // Get current UART configuration
+          logDebug("Reading current UART configuration...");
+          const currentConfig = await getCurrentUartConfig();
+
           // Configure UART
           const uartConfig = new Uint8Array([
-            // UART_CONFIG_REPORT_ID, // Set UART Config
             (UART_CONFIG.BAUD_RATE >> 24) & 0xff,
             (UART_CONFIG.BAUD_RATE >> 16) & 0xff,
             (UART_CONFIG.BAUD_RATE >> 8) & 0xff,
@@ -147,9 +198,13 @@
             UART_CONFIG.DATA_BITS,
             UART_CONFIG.STOP_BITS
           ]);
-          logDebug(`Sending UART config: ${arrayToHex(uartConfig)}`);
+          logDebug(`Sending new UART config: ${arrayToHex(uartConfig)}`);
           await device.sendFeatureReport(UART_CONFIG_REPORT_ID, uartConfig);
           logSuccess("UART configured successfully");
+
+          // Verify new configuration
+          logDebug("Verifying new UART configuration...");
+          const newConfig = await getCurrentUartConfig();
 
           // Enable UART
           const enableUart = new Uint8Array([0x01]);
