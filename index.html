@@ -250,6 +250,7 @@
               (sum, item) => sum + item.reportSize * item.reportCount,
               0
             );
+            console.log("report:", report.items);
             const totalBytes = Math.ceil(totalBits / 8);
             logDebug(`Expected report size: ${totalBytes} bytes`);
 
@@ -342,11 +343,11 @@
             // Remove processed packet
             dataBuffer = dataBuffer.slice(0x0d + 1);
           } else {
-            logDebug(
-              `Unknown packet type: 0x${packetType.toString(
-                16
-              )}, discarding first byte`
-            );
+            // logDebug(
+            //   `Unknown packet type: 0x${packetType.toString(
+            //     16
+            //   )}, discarding first byte`
+            // );
             dataBuffer = dataBuffer.slice(1);
           }
         }
