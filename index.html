@@ -188,14 +188,14 @@
           device.collections.forEach((collection, index) => {
             logDebug(`Collection ${index}:`);
             collection.inputReports.forEach(report => {
-              const totalBits = report.items.reduce(
-                (sum, item) => sum + item.reportSize * item.reportCount,
-                0
-              );
-              const totalBytes = Math.ceil(totalBits / 8);
-              logDebug(
-                `  Report ID: ${report.reportId}, Total size: ${totalBits} bits (${totalBytes} bytes)`
-              );
+              if (report.items.length > 0) {
+                const firstItem = report.items[0];
+                const totalBits = firstItem.reportSize * firstItem.reportCount;
+                const totalBytes = Math.ceil(totalBits / 8);
+                logDebug(
+                  `  Report ID: ${report.reportId}, Size from first item: ${totalBits} bits (${totalBytes} bytes)`
+                );
+              }
             });
           });
 
@@ -240,19 +240,18 @@
           const data = new Uint8Array(event.data.buffer);
           logDebug(`Received input report: ${arrayToHex(data)}`);
 
-          // Calculate correct report size from collections
+          // Calculate correct report size from first item in collection
           const collection = device.collections[0]; // Assuming first collection
           const report = collection.inputReports.find(
             r => r.reportId === event.reportId
           );
-          if (report) {
-            const totalBits = report.items.reduce(
-              (sum, item) => sum + item.reportSize * item.reportCount,
-              0
-            );
-            console.log("report:", report.items);
+          if (report && report.items.length > 0) {
+            const firstItem = report.items[0];
+            const totalBits = firstItem.reportSize * firstItem.reportCount;
             const totalBytes = Math.ceil(totalBits / 8);
-            logDebug(`Expected report size: ${totalBytes} bytes`);
+            logDebug(
+              `Expected report size from first item: ${totalBytes} bytes`
+            );
 
             // Only use the actual data bytes
             const actualData = data.slice(0, totalBytes);
